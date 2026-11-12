@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
 permissions:
   contents: read
 jobs:
@@ -19,3 +20,16 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
+  required-ci:
+    if: always()
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required jobs and PR readiness
+        env:
+          DRAFT: ${{ github.event.pull_request.draft }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          if [ "$DRAFT" = "true" ] || [ "$TEST_RESULT" != "success" ]; then
+            exit 1
+          fi
