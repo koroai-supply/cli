@@ -58,6 +58,9 @@ enum Command {
         #[arg(long)]
         all: bool,
     },
+    /// クイック注文の商品を1パッケージ注文。showで設定中の商品を表示
+    #[command(visible_alias = "qo")]
+    QuickOrder(QuickOrderArgs),
     /// 取り扱いリクエストを作成・一覧・照会
     #[command(visible_alias = "r")]
     Request {
@@ -83,6 +86,22 @@ struct ProductArgs {
     /// 続きのページも取得
     #[arg(long)]
     all: bool,
+}
+
+#[derive(Args)]
+#[command(args_conflicts_with_subcommands = true)]
+struct QuickOrderArgs {
+    #[command(subcommand)]
+    action: Option<QuickOrderAction>,
+    /// 再送時も同じ値を使用
+    #[arg(long)]
+    idempotency_key: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum QuickOrderAction {
+    /// 設定中のクイック注文の商品を表示
+    Show,
 }
 
 #[derive(Subcommand)]
@@ -146,6 +165,9 @@ enum RequestAction {
     },
 }
 
+const QUICK_ORDER_NOT_SET: &str =
+    "。クイック注文の商品が未設定です。頃合商店アプリの連携のタブで設定してください";
+
 struct Call {
     method: &'static str,
     path: String,
@@ -187,6 +209,15 @@ fn cursor(value: &Option<String>) -> Result<(), String> {
         id(v)?;
     }
     Ok(())
+}
+
+/// クイック注文の冪等キーを作る。時刻（ナノ秒）とプロセスIDから作り、同じ人が続けて呼んでも重ならない。
+fn generated_key() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    format!("qo-{nanos:x}-{:x}", std::process::id())
 }
 
 fn key(value: &str) -> Result<(), String> {
@@ -324,6 +355,41 @@ fn plan(command: Command) -> Result<Call, String> {
             cursor,
             all,
         } => list("orders", cursor, all),
+        Command::QuickOrder(q) => match q.action {
+            Some(QuickOrderAction::Show) => Ok(Call {
+                method: "GET",
+                path: "/v1/quick-order".into(),
+                query: vec![],
+                body: None,
+                key: None,
+                kind: "quick-order",
+                all: false,
+            }),
+            None => {
+                // キーを省いたら、押すたびに新しいキーを作る（短縮して呼べるように）。結果が分からなかったときに
+                // 同じキーで再送できるよう、作ったキーを標準エラーに出す。
+                let value = match q.idempotency_key {
+                    Some(value) => value,
+                    None => {
+                        let value = generated_key();
+                        eprintln!(
+                            "冪等キー: {value}（結果が分からないときは --idempotency-key {value} で再送してください）"
+                        );
+                        value
+                    }
+                };
+                key(&value)?;
+                Ok(Call {
+                    method: "POST",
+                    path: "/v1/quick-order".into(),
+                    query: vec![],
+                    body: Some(json!({})),
+                    key: Some(value),
+                    kind: "orders",
+                    all: false,
+                })
+            }
+        },
         Command::Request { action } => match action {
             RequestAction::Create {
                 jan: value,
@@ -401,7 +467,9 @@ fn request(
                 .and_then(|v| v.get("error"))
                 .and_then(Value::as_str)
                 .unwrap_or("unknown_error");
-            let hint = if status == 401 {
+            let hint = if code == "quick_order_not_set" {
+                QUICK_ORDER_NOT_SET
+            } else if status == 401 {
                 "。再ログインしてください: ks login"
             } else if status == 429 {
                 "。Retry-Afterの秒数を待ってください"
@@ -414,7 +482,17 @@ fn request(
             ));
         }
         Err(ureq::Error::Transport(_)) => {
-            return Err(if call.path == "/v1/orders" && call.method == "POST" { "通信エラー。注文結果は未確定です。注文一覧を確認し、再送する場合は同じ冪等キー・JAN・数量を使ってください" } else { "通信エラー" }.into());
+            return Err(match (call.method, call.path.as_str()) {
+                ("POST", "/v1/orders") => "通信エラー。注文結果は未確定です。注文一覧を確認し、再送する場合は同じ冪等キー・JAN・数量を使ってください",
+                ("POST", "/v1/quick-order") => {
+                    return Err(format!(
+                        "通信エラー。注文結果は未確定です。注文一覧を確認し、再送する場合は同じ冪等キー（--idempotency-key {}）を使ってください",
+                        call.key.as_deref().unwrap_or_default()
+                    ))
+                }
+                _ => "通信エラー",
+            }
+            .into());
         }
     };
     serde_json::from_str(&body).map_err(|_| "API応答がJSONではありません".into())
@@ -470,6 +548,25 @@ fn display(result: &Value, kind: &str, json_output: bool) -> Result<(), String> 
         return Ok(());
     }
     let data = result.get("data").ok_or("API応答にdataがありません")?;
+    if kind == "quick-order" {
+        match data.get("product") {
+            Some(Value::Null) => println!(
+                "クイック注文の商品は未設定です。頃合商店アプリの連携のタブで設定してください。"
+            ),
+            Some(product @ Value::Object(_)) => {
+                for (title, key) in [
+                    ("JAN", "jan"),
+                    ("商品名", "name"),
+                    ("税込円", "unit_price_jpy"),
+                    ("単位", "purchase_unit"),
+                ] {
+                    println!("{title}: {}", value(product, key));
+                }
+            }
+            _ => return Err("API応答のproductが正しくありません".into()),
+        }
+        return Ok(());
+    }
     if let Some(rows) = data.as_array() {
         let columns: &[(&str, &str)] = match kind {
             "products" => &[
@@ -625,5 +722,113 @@ mod tests {
         let result = request(&call, &base, "fake-access", None).unwrap();
         assert_eq!(result["data"], json!([]));
         server.join().unwrap();
+    }
+
+    fn serve_once(status: &str, body: &'static str) -> (u16, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let status = status.to_owned();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0; 4096];
+            let mut request = Vec::new();
+            loop {
+                let size = stream.read(&mut buffer).unwrap();
+                request.extend_from_slice(&buffer[..size]);
+                let text = String::from_utf8_lossy(&request).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length = text
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length: ")
+                                .map(|v| v.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= end + 4 + length || size == 0 {
+                        break;
+                    }
+                }
+            }
+            write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+            String::from_utf8_lossy(&request).to_string()
+        });
+        (port, server)
+    }
+
+    #[test]
+    fn quick_order_commands() {
+        let parse = |args: &[&str]| plan(Cli::try_parse_from(args).unwrap().command);
+        let order = parse(&["ks", "quick-order", "--idempotency-key", "qo-0001"]).unwrap();
+        assert_eq!(
+            (order.method, order.path.as_str()),
+            ("POST", "/v1/quick-order")
+        );
+        assert_eq!(order.body, Some(json!({})));
+        assert_eq!(order.key.as_deref(), Some("qo-0001"));
+        assert_eq!(order.kind, "orders");
+        let show = parse(&["ks", "qo", "show"]).unwrap();
+        assert_eq!(
+            (show.method, show.path.as_str()),
+            ("GET", "/v1/quick-order")
+        );
+        assert!(show.key.is_none() && show.body.is_none());
+        // キーを省いたら自動で作る。押すたびに別のキーになる。
+        let auto = parse(&["ks", "qo"]).unwrap();
+        let first = auto.key.clone().unwrap();
+        assert!(first.starts_with("qo-") && key(&first).is_ok());
+        assert_ne!(Some(first), parse(&["ks", "qo"]).unwrap().key);
+        assert!(parse(&["ks", "qo", "--idempotency-key", "bad key"]).is_err());
+        assert!(Cli::try_parse_from(["ks", "qo", "show", "--idempotency-key", "qo-0001"]).is_err());
+    }
+
+    #[test]
+    fn quick_order_sends_key_and_empty_body() {
+        let (port, server) = serve_once(
+            "201 Created",
+            r#"{"data":{"id":"00000000-0000-4000-8000-000000000001","status":"accepted"}}"#,
+        );
+        let call = plan(
+            Cli::try_parse_from(["ks", "qo", "--idempotency-key", "qo-0001"])
+                .unwrap()
+                .command,
+        )
+        .unwrap();
+        let base = auth::origin(&format!("http://127.0.0.1:{port}")).unwrap();
+        let result = request(&call, &base, "fake-access", None).unwrap();
+        assert_eq!(result["data"]["status"], "accepted");
+        let sent = server.join().unwrap();
+        let lower = sent.to_ascii_lowercase();
+        assert!(sent.starts_with("POST /v1/quick-order "));
+        assert!(lower.contains("idempotency-key: qo-0001"));
+        assert!(lower.contains("content-type: application/json"));
+        assert!(sent.ends_with("\r\n\r\n{}"));
+    }
+
+    #[test]
+    fn quick_order_not_set_guides_to_app() {
+        let (port, server) = serve_once(
+            "422 Unprocessable Entity",
+            r#"{"error":"quick_order_not_set"}"#,
+        );
+        let call = plan(
+            Cli::try_parse_from(["ks", "qo", "--idempotency-key", "qo-0001"])
+                .unwrap()
+                .command,
+        )
+        .unwrap();
+        let base = auth::origin(&format!("http://127.0.0.1:{port}")).unwrap();
+        let error = request(&call, &base, "fake-access", None).unwrap_err();
+        assert!(error.starts_with("HTTP 422: quick_order_not_set"));
+        assert!(error.contains("連携のタブ"));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn quick_order_show_accepts_unset_and_set_product() {
+        assert!(display(&json!({"data":{"product":null}}), "quick-order", false).is_ok());
+        let set = json!({"data":{"product":{"jan":"4901234567894","name":"お茶","unit_price_jpy":120,"purchase_unit":"package"}}});
+        assert!(display(&set, "quick-order", false).is_ok());
+        assert!(display(&json!({"data":{}}), "quick-order", false).is_err());
     }
 }
