@@ -40,6 +40,8 @@ ks logout
 | JANで商品を照会 | `ks p get 4901234567894`、`ks p --jan 4901234567894` |
 | 見積もり | `ks quote create 4901234567894 --qty 1` / `ks q create ...`、`ks q get <ID>` |
 | 注文 | `ks order create 4901234567894 --qty 1 --idempotency-key refill-0001` / `ks o create ...` |
+| クイック注文 | `ks quick-order --idempotency-key qo-0001` / `ks qo ...` |
+| クイック注文の商品 | `ks quick-order show` / `ks qo show` |
 | 過去の注文 | `ks order list` / `ks o list` |
 | 注文状況 | `ks status <ID>` / `ks s <ID>`。IDを省くと一覧 |
 | 注文取消 | `ks o cancel <ID>` |
@@ -52,6 +54,18 @@ ks o list --all --json
 ```
 
 注文作成には保存した冪等キーが必須です。通信失敗やタイムアウトは注文の失敗を意味しません。`ks o list` で確認し、必要なら**同じキー・同じJAN・同じ数量**で再送してください。CLIは自動で別のキーを発行したり、注文を自動再送したりしません。
+
+### クイック注文
+
+クイック注文は、ホームに1つ設定した商品を確認なしで1パッケージ注文します。商品は指定しません。`ks qo show` で設定中の商品（JAN・商品名・税込円）を表示し、未設定なら案内を出します。商品の設定・変更・解除はCLIからはできません。頃合商店アプリの連携のタブ（またはMCP）で行ってください。未設定のまま注文すると `quick_order_not_set` のエラーと同じ案内を出します。
+
+```sh
+ks qo show
+ks qo --idempotency-key qo-20261112-1
+ks qo --idempotency-key qo-20261112-1 --json
+```
+
+冪等キーの扱いは注文作成と同じで、必須です。通信失敗やタイムアウトのときは `ks o list` で確認し、必要なら**同じキー**で再送してください。
 
 ## 開発
 
