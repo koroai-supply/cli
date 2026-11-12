@@ -4,7 +4,14 @@ Rust製の頃合商店 Public API クライアントです。実行コマンド�
 
 ## インストール
 
-Rust 1.89以降が必要です。macOSではキーチェーン、LinuxではSecret Service（`secret-tool` / libsecret）を使います。Windowsの資格情報ストアは初版では未対応です。
+macOSではHomebrewでインストールできます。
+
+```sh
+brew install koroai-supply/tap/ks
+ks --help
+```
+
+ソースからインストールする場合はRust 1.89以降が必要です。macOSではキーチェーン、LinuxではSecret Service（`secret-tool` / libsecret）を使います。Windowsの資格情報ストアは初版では未対応です。
 
 ```sh
 cargo install --path . --locked
