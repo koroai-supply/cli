@@ -7,8 +7,8 @@ Rust製の頃合商店 Public API クライアントです。実行コマンド�
 macOSではHomebrewでインストールできます。
 
 ```sh
-brew tap koroai-supply/brew https://github.com/koroai-supply/brew.git
-brew install koroai-supply/brew/ks
+brew tap koroai-supply/cli https://github.com/koroai-supply/cli.git
+brew install koroai-supply/cli/ks
 ks --help
 ```
 
