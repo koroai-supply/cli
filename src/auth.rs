@@ -323,7 +323,7 @@ pub fn login(profile: &Profile, no_browser: bool) -> Result<(), String> {
         .unwrap_or(5)
         .max(1);
     println!(
-        "Webで本番用の端末を承認してください。\nURL: {uri}\n確認コード: {code}\n端末名: {device_name}\n有効期限: {expires}秒"
+        "Webでこの端末を承認してください。\nURL: {uri}\n確認コード: {code}\n端末名: {device_name}\n有効期限: {expires}秒"
     );
     if !no_browser {
         open_browser(&uri);
@@ -346,7 +346,7 @@ pub fn login(profile: &Profile, no_browser: bool) -> Result<(), String> {
             Ok(response) => {
                 let token = Token::from_response(&read_json(response)?, "live")?;
                 save(profile, &token)?;
-                println!("本番用としてログインしました。ホーム: {}", token.home_id);
+                println!("ログインしました。");
                 return Ok(());
             }
             Err(ureq::Error::Status(_, response)) => match error_code(response).as_str() {
@@ -426,8 +426,8 @@ mod tests {
 
     #[test]
     fn keeps_credentials_separate_by_api_origin() {
-        let production = Profile::new(AUTH_URL, API_URL).unwrap();
-        let staging = Profile::new(AUTH_URL, "https://staging-api.koroai.supply").unwrap();
-        assert_ne!(production.service(), staging.service());
+        let default = Profile::new(AUTH_URL, API_URL).unwrap();
+        let alternate = Profile::new(AUTH_URL, "https://other-api.example.com").unwrap();
+        assert_ne!(default.service(), alternate.service());
     }
 }

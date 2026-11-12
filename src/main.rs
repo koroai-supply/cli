@@ -8,16 +8,16 @@ use url::Url;
 use uuid::Uuid;
 
 #[derive(Parser)]
-#[command(name = "ks", version, about = "頃合商店の本番用CLI")]
+#[command(name = "ks", version, about = "頃合商店 CLI")]
 struct Cli {
     /// JSON形式で出力
     #[arg(long, global = true)]
     json: bool,
-    /// 公開APIの接続先（開発・検証用）
-    #[arg(long, global = true, env = "KOROAI_API_URL", default_value = auth::API_URL)]
+    /// 公開APIの接続先
+    #[arg(long, global = true, env = "KOROAI_API_URL", default_value = auth::API_URL, hide = true)]
     api_url: String,
-    /// OAuth認可サーバーの接続先（開発・検証用）
-    #[arg(long, global = true, env = "KOROAI_AUTH_URL", default_value = auth::AUTH_URL)]
+    /// OAuth認可サーバーの接続先
+    #[arg(long, global = true, env = "KOROAI_AUTH_URL", default_value = auth::AUTH_URL, hide = true)]
     auth_url: String,
     #[command(subcommand)]
     command: Command,
@@ -108,7 +108,7 @@ enum QuoteAction {
 
 #[derive(Subcommand)]
 enum OrderAction {
-    /// 本番の注文を作成
+    /// 注文を作成
     Create(Purchase),
     List {
         /// 前の一覧応答のnext_cursor
