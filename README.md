@@ -40,7 +40,7 @@ ks logout
 | JANで商品を照会 | `ks p get 4901234567894`、`ks p --jan 4901234567894` |
 | 見積もり | `ks quote create 4901234567894 --qty 1` / `ks q create ...`、`ks q get <ID>` |
 | 注文 | `ks order create 4901234567894 --qty 1 --idempotency-key refill-0001` / `ks o create ...` |
-| クイック注文 | `ks quick-order --idempotency-key qo-0001` / `ks qo ...` |
+| クイック注文 | `ks quick-order` / `ks qo`（冪等キーは省けば自動で作る。`--idempotency-key qo-0001`で指定も可） |
 | クイック注文の商品 | `ks quick-order show` / `ks qo show` |
 | 過去の注文 | `ks order list` / `ks o list` |
 | 注文状況 | `ks status <ID>` / `ks s <ID>`。IDを省くと一覧 |
@@ -53,7 +53,7 @@ ks logout
 ks o list --all --json
 ```
 
-注文作成には保存した冪等キーが必須です。通信失敗やタイムアウトは注文の失敗を意味しません。`ks o list` で確認し、必要なら**同じキー・同じJAN・同じ数量**で再送してください。CLIは自動で別のキーを発行したり、注文を自動再送したりしません。
+注文作成には保存した冪等キーが必須です。通信失敗やタイムアウトは注文の失敗を意味しません。`ks o list` で確認し、必要なら**同じキー・同じJAN・同じ数量**で再送してください。CLIは自動で別のキーを発行したり、注文を自動再送したりしません（クイック注文だけは、キーを省いたときに新しいキーを作ります。自動再送はしません）。
 
 ### クイック注文
 
@@ -61,11 +61,12 @@ ks o list --all --json
 
 ```sh
 ks qo show
+ks qo
+ks qo --json
 ks qo --idempotency-key qo-20261112-1
-ks qo --idempotency-key qo-20261112-1 --json
 ```
 
-冪等キーの扱いは注文作成と同じで、必須です。通信失敗やタイムアウトのときは `ks o list` で確認し、必要なら**同じキー**で再送してください。
+冪等キーは省けます。省くとCLIが呼ぶたびに新しいキーを作り、標準エラーに出します。通信失敗やタイムアウトのときは `ks o list` で確認し、必要なら表示された**同じキー**を `--idempotency-key` に指定して再送してください（自動では再送しません）。
 
 ## 開発
 

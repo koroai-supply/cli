@@ -211,6 +211,15 @@ fn cursor(value: &Option<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// クイック注文の冪等キーを作る。時刻（ナノ秒）とプロセスIDから作り、同じ人が続けて呼んでも重ならない。
+fn generated_key() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    format!("qo-{nanos:x}-{:x}", std::process::id())
+}
+
 fn key(value: &str) -> Result<(), String> {
     if value.len() > 128
         || value.is_empty()
@@ -357,9 +366,18 @@ fn plan(command: Command) -> Result<Call, String> {
                 all: false,
             }),
             None => {
-                let value = q.idempotency_key.ok_or(
-                    "クイック注文には --idempotency-key が必要です。再送時も同じキーを使ってください",
-                )?;
+                // キーを省いたら、押すたびに新しいキーを作る（短縮して呼べるように）。結果が分からなかったときに
+                // 同じキーで再送できるよう、作ったキーを標準エラーに出す。
+                let value = match q.idempotency_key {
+                    Some(value) => value,
+                    None => {
+                        let value = generated_key();
+                        eprintln!(
+                            "冪等キー: {value}（結果が分からないときは --idempotency-key {value} で再送してください）"
+                        );
+                        value
+                    }
+                };
                 key(&value)?;
                 Ok(Call {
                     method: "POST",
@@ -466,7 +484,12 @@ fn request(
         Err(ureq::Error::Transport(_)) => {
             return Err(match (call.method, call.path.as_str()) {
                 ("POST", "/v1/orders") => "通信エラー。注文結果は未確定です。注文一覧を確認し、再送する場合は同じ冪等キー・JAN・数量を使ってください",
-                ("POST", "/v1/quick-order") => "通信エラー。注文結果は未確定です。注文一覧を確認し、再送する場合は同じ冪等キーを使ってください",
+                ("POST", "/v1/quick-order") => {
+                    return Err(format!(
+                        "通信エラー。注文結果は未確定です。注文一覧を確認し、再送する場合は同じ冪等キー（--idempotency-key {}）を使ってください",
+                        call.key.as_deref().unwrap_or_default()
+                    ))
+                }
                 _ => "通信エラー",
             }
             .into());
@@ -750,7 +773,11 @@ mod tests {
             ("GET", "/v1/quick-order")
         );
         assert!(show.key.is_none() && show.body.is_none());
-        assert!(parse(&["ks", "qo"]).is_err());
+        // キーを省いたら自動で作る。押すたびに別のキーになる。
+        let auto = parse(&["ks", "qo"]).unwrap();
+        let first = auto.key.clone().unwrap();
+        assert!(first.starts_with("qo-") && key(&first).is_ok());
+        assert_ne!(Some(first), parse(&["ks", "qo"]).unwrap().key);
         assert!(parse(&["ks", "qo", "--idempotency-key", "bad key"]).is_err());
         assert!(Cli::try_parse_from(["ks", "qo", "show", "--idempotency-key", "qo-0001"]).is_err());
     }
