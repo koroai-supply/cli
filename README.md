@@ -2,7 +2,7 @@
 
 Rust製の頃合商店 Public API クライアントです。実行コマンドは `ks` です。
 
-**開発中です。** 公開APIのOAuth Device認可は[契約草案](https://github.com/koroai-supply/api/blob/main/openapi.yaml)で、サービス側に未実装です。現時点で本番の注文には使用できません。
+**開発中です。** 公開APIのOAuth Device認可は[契約草案のPR](https://github.com/koroai-supply/api/pull/6)で、サービス側に未実装です。現時点で本番の注文には使用できません。
 
 ## インストール
 
